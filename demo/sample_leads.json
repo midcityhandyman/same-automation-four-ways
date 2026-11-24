@@ -1,0 +1,18 @@
+{
+  "_note": "Synthetic data only. Names are invented, phones use the 555-01xx fiction range, emails use example.com.",
+  "start_utc": "2026-01-05T14:00:00+00:00",
+  "sms_permanent_failures": ["+15555550104", "+15555550105"],
+  "sms_transient_failures": {"+15555550106": 2},
+  "actions": [
+    {"at_hours": 0, "lead": {"name": "Alex Sample", "phone": "(555) 555-0101", "email": "Alex.Sample@example.com", "service": "gutter cleaning", "source": "website"}},
+    {"at_hours": 1, "lead": {"name": "Blake Example", "phone": "555-555-0102", "service": "deck repair", "source": "ad form"}},
+    {"at_hours": 2, "lead": {"name": "Alex Sample", "phone": "555.555.0101", "service": "gutter cleaning", "source": "ad form"}},
+    {"at_hours": 3, "lead": {"name": "Casey Placeholder", "phone": "12345", "email": "not-an-email", "service": "painting", "source": "website"}},
+    {"at_hours": 4, "lead": {"name": "Devon Demo", "phone": "555 555 0104", "email": "devon.demo@example.com", "service": "fence repair", "source": "website"}},
+    {"at_hours": 5, "lead": {"name": "Emery Test", "phone": "5555550105", "service": "window cleaning", "source": "referral"}},
+    {"at_hours": 6, "lead": {"name": "Gray Fixture", "phone": "1-555-555-0107", "service": "painting", "source": "website"}},
+    {"at_hours": 14.5, "lead": {"name": "Finley Mock", "phone": "+1 555 555 0106", "service": "drywall patch", "source": "ad form"}},
+    {"at_hours": 32, "reply": {"from": "+15555550107", "text": "stop"}},
+    {"at_hours": 36, "reply": {"from": "(555) 555-0102", "text": "Yes, Tuesday afternoon works"}}
+  ]
+}

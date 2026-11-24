@@ -1,0 +1,86 @@
+LEAD FOLLOW UP: OFFLINE SIMULATION
+11 simulated days, hourly ticks, mock adapters, synthetic leads.
+Times are local (UTC-5). Send window 08:00 to 20:00.
+
+EVENT LOG
+Mon 01-05 09:00  phone:+15555550101    accepted           Alex Sample, gutter cleaning, source=website
+Mon 01-05 09:00  phone:+15555550101    crm_upserted
+Mon 01-05 09:00  phone:+15555550101    sent               ack via sms
+Mon 01-05 09:00  phone:+15555550101    team_notified      New lead: Alex Sample (gutter cleaning) via website
+Mon 01-05 10:00  phone:+15555550102    accepted           Blake Example, deck repair, source=ad form
+Mon 01-05 10:00  phone:+15555550102    crm_upserted
+Mon 01-05 10:00  phone:+15555550102    sent               ack via sms
+Mon 01-05 10:00  phone:+15555550102    team_notified      New lead: Blake Example (deck repair) via ad form
+Mon 01-05 11:00  phone:+15555550101    duplicate          source=ad form
+Mon 01-05 12:00  -                     rejected           no usable phone or email
+Mon 01-05 12:00  -                     team_notified      Lead rejected (no usable phone or email). See the dead letter queue.
+Mon 01-05 13:00  phone:+15555550104    accepted           Devon Demo, fence repair, source=website
+Mon 01-05 13:00  phone:+15555550104    crm_upserted
+Mon 01-05 13:00  phone:+15555550104    send_failed        ack via sms: sms to +15555550104 rejected by provider
+Mon 01-05 13:00  phone:+15555550104    sent               ack via email
+Mon 01-05 13:00  phone:+15555550104    team_notified      New lead: Devon Demo (fence repair) via website
+Mon 01-05 14:00  phone:+15555550105    accepted           Emery Test, window cleaning, source=referral
+Mon 01-05 14:00  phone:+15555550105    crm_upserted
+Mon 01-05 14:00  phone:+15555550105    send_failed        ack via sms: sms to +15555550105 rejected by provider
+Mon 01-05 14:00  phone:+15555550105    unreachable        all channels failed, sequence stopped
+Mon 01-05 14:00  phone:+15555550105    team_notified      Could not reach Emery Test (ack). sms: sms to +15555550105 rejected by provider
+Mon 01-05 15:00  phone:+15555550107    accepted           Gray Fixture, painting, source=website
+Mon 01-05 15:00  phone:+15555550107    crm_upserted
+Mon 01-05 15:00  phone:+15555550107    sent               ack via sms
+Mon 01-05 15:00  phone:+15555550107    team_notified      New lead: Gray Fixture (painting) via website
+Mon 01-05 23:30  phone:+15555550106    accepted           Finley Mock, drywall patch, source=ad form
+Mon 01-05 23:30  phone:+15555550106    crm_upserted
+Mon 01-05 23:30  phone:+15555550106    retry              ack sms: attempt 1 failed (sms provider timeout), waiting 2s
+Mon 01-05 23:30  phone:+15555550106    retry              ack sms: attempt 2 failed (sms provider timeout), waiting 4s
+Mon 01-05 23:30  phone:+15555550106    sent               ack via sms
+Mon 01-05 23:30  phone:+15555550106    team_notified      New lead: Finley Mock (drywall patch) via ad form
+Tue 01-06 09:00  phone:+15555550101    sent               follow_up_1 via sms
+Tue 01-06 10:00  phone:+15555550102    sent               follow_up_1 via sms
+Tue 01-06 13:00  phone:+15555550104    send_failed        follow_up_1 via sms: sms to +15555550104 rejected by provider
+Tue 01-06 13:00  phone:+15555550104    sent               follow_up_1 via email
+Tue 01-06 15:00  phone:+15555550107    sent               follow_up_1 via sms
+Tue 01-06 17:00  phone:+15555550107    opted_out          cancelled 3 pending steps
+Tue 01-06 21:00  phone:+15555550102    replied            cancelled 3 pending steps
+Tue 01-06 21:00  phone:+15555550102    team_notified      Blake Example replied. Follow ups stopped, over to a person.
+Wed 01-07 08:00  phone:+15555550106    sent               follow_up_1 via sms
+Thu 01-08 09:00  phone:+15555550101    sent               follow_up_2 via sms
+Thu 01-08 13:00  phone:+15555550104    send_failed        follow_up_2 via sms: sms to +15555550104 rejected by provider
+Thu 01-08 13:00  phone:+15555550104    sent               follow_up_2 via email
+Fri 01-09 08:00  phone:+15555550106    sent               follow_up_2 via sms
+Mon 01-12 09:00  phone:+15555550101    sent               follow_up_3 via sms
+Mon 01-12 13:00  phone:+15555550104    send_failed        follow_up_3 via sms: sms to +15555550104 rejected by provider
+Mon 01-12 13:00  phone:+15555550104    sent               follow_up_3 via email
+Tue 01-13 08:00  phone:+15555550106    sent               follow_up_3 via sms
+Thu 01-15 09:00  phone:+15555550101    closed_no_response
+Thu 01-15 13:00  phone:+15555550104    closed_no_response
+Fri 01-16 08:00  phone:+15555550106    closed_no_response
+
+FINAL LEAD STATUS
+Alex Sample     closed_no_response  follow_up_1=done, follow_up_2=done, follow_up_3=done, close=done
+Blake Example   replied             follow_up_1=done, follow_up_2=cancelled, follow_up_3=cancelled, close=cancelled
+Devon Demo      closed_no_response  follow_up_1=done, follow_up_2=done, follow_up_3=done, close=done
+Emery Test      unreachable         none scheduled
+Finley Mock     closed_no_response  follow_up_1=done, follow_up_2=done, follow_up_3=done, close=done
+Gray Fixture    opted_out           follow_up_1=done, follow_up_2=cancelled, follow_up_3=cancelled, close=cancelled
+
+DEAD LETTER QUEUE
+Mon 01-05 12:00  validation  no usable phone or email
+Mon 01-05 14:00  send        sms: sms to +15555550105 rejected by provider
+
+TOTALS
+messages sent: 16 (email 4, sms 12)
+team notifications: 8
+CRM records: 6
+dead letters: 2
+simulated backoff sleeps (seconds): [2.0, 4.0]
+
+COST MODEL
+ASSUMPTIONS ONLY. These are placeholder inputs, not vendor prices.
+Inputs: 400 leads/month, duplicate rate 0.1, upkeep rate 60/hour
+Formula: total = base_fee + max(0, units - included_units) * overage_per_unit + maintenance_hours * hourly_rate
+
+platform              billing unit      units  platform fee   upkeep    total
+n8n (hosted)          execution           400         25.00    60.00    85.00
+Make                  operation         11360         11.36    90.00   101.36
+Zapier                task               4800         86.00    90.00   176.00
+Python (small server) none                  0          8.00   180.00   188.00

@@ -1,0 +1,58 @@
+{
+  "_warning": "Every number in this file is an ASSUMPTION for illustration. None is a quoted vendor price. Replace the fees with figures from your own plan before using the output.",
+  "scenario": {
+    "leads_per_month": 400,
+    "duplicate_rate": 0.1,
+    "hourly_rate": 60
+  },
+  "platforms": [
+    {
+      "name": "n8n (hosted)",
+      "billing_unit": "execution",
+      "units_full_path": 1,
+      "units_duplicate_path": 1,
+      "fixed_units_per_month": 0,
+      "base_fee": 25,
+      "included_units": 2500,
+      "overage_per_unit": 0.01,
+      "maintenance_hours": 1.0,
+      "notes": "Assumes one execution per lead because Wait nodes resume the same execution. Fee, allowance and overage are placeholders."
+    },
+    {
+      "name": "Make",
+      "billing_unit": "operation",
+      "units_full_path": 23,
+      "units_duplicate_path": 5,
+      "fixed_units_per_month": 2880,
+      "base_fee": 10,
+      "included_units": 10000,
+      "overage_per_unit": 0.001,
+      "maintenance_hours": 1.5,
+      "notes": "Unit counts are module runs counted from make/scenario-outline.md. The fixed units are the follow up runner polling every 15 minutes for 30 days (96 * 30). Fee, allowance and overage are placeholders."
+    },
+    {
+      "name": "Zapier",
+      "billing_unit": "task",
+      "units_full_path": 13,
+      "units_duplicate_path": 3,
+      "fixed_units_per_month": 0,
+      "base_fee": 30,
+      "included_units": 2000,
+      "overage_per_unit": 0.02,
+      "maintenance_hours": 1.5,
+      "notes": "Unit counts are action steps counted from zapier/zap-outline.md, assuming trigger, filter, path and delay steps are not billed. Fee, allowance and overage are placeholders."
+    },
+    {
+      "name": "Python (small server)",
+      "billing_unit": "none",
+      "units_full_path": 0,
+      "units_duplicate_path": 0,
+      "fixed_units_per_month": 0,
+      "base_fee": 8,
+      "included_units": 0,
+      "overage_per_unit": 0,
+      "maintenance_hours": 3.0,
+      "notes": "Flat hosting placeholder with no per lead charge. Maintenance hours are higher because you own patching, deploys and monitoring."
+    }
+  ]
+}

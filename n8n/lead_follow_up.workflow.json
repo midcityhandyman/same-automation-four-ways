@@ -1,0 +1,1578 @@
+{
+  "name": "Lead Follow Up (same automation, four ways)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-follow-up",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b50a69ad-9dd0-53aa-beee-8335832c0e3e",
+      "name": "Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Spec step S1",
+      "webhookId": "80c3838c-ea1d-59ba-85d2-75c89ce8b2c1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Lead (S2) and plan the schedule (S7).\n// Mirrors src/lead_followup/normalize.py. tests/test_four_ways.py runs both\n// on the same payloads when Node.js is available.\nconst item = $input.first().json;\nconst raw = item.body ?? item;\nconst OFFSET = Number($env.LOCAL_UTC_OFFSET_HOURS ?? -5);\nconst START = Number($env.SEND_WINDOW_START ?? 8);\nconst END = Number($env.SEND_WINDOW_END ?? 20);\nconst HOUR = 3600 * 1000;\nconst FOLLOW_UP_DAYS = [1, 3, 7];\nconst CLOSE_AFTER_DAYS = 10;\n\nfunction normPhone(value) {\n  const text = String(value ?? '').trim();\n  const digits = text.replace(/[^0-9]/g, '');\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  if (text.startsWith('+') && digits.length >= 8 && digits.length <= 15) return '+' + digits;\n  return null;\n}\n\nfunction normEmail(value) {\n  const text = String(value ?? '').trim().toLowerCase();\n  return /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(text) ? text : null;\n}\n\n// Move a send time into the local send window. Inside the window: unchanged.\nfunction quietAdjust(moment) {\n  const local = new Date(moment.getTime() + OFFSET * HOUR);\n  const hour = local.getUTCHours();\n  if (hour >= START && hour < END) return moment;\n  if (hour >= END) local.setUTCDate(local.getUTCDate() + 1);\n  local.setUTCHours(START, 0, 0, 0);\n  return new Date(local.getTime() - OFFSET * HOUR);\n}\n\nconst name = String(raw.name ?? '').trim();\nconst phone = normPhone(raw.phone);\nconst email = normEmail(raw.email);\nconst received = raw.received_at ? new Date(raw.received_at) : new Date();\n\nlet reason = null;\nif (!name) reason = 'missing name';\nelse if (!phone && !email) reason = 'no usable phone or email';\nelse if (Number.isNaN(received.getTime())) reason = 'received_at is not an ISO timestamp';\n\nif (reason) {\n  return [{ json: { valid: false, reason, raw } }];\n}\n\nconst due = (days) => quietAdjust(new Date(received.getTime() + days * 24 * HOUR)).toISOString();\n\nreturn [{\n  json: {\n    valid: true,\n    key: phone ? 'phone:' + phone : 'email:' + email,\n    name,\n    first_name: name.split(/\\s+/)[0],\n    email,\n    phone,\n    service: String(raw.service ?? '').trim() || 'general',\n    message: String(raw.message ?? '').trim(),\n    source: String(raw.source ?? '').trim() || 'unknown',\n    received_at: received.toISOString(),\n    primary_channel: phone ? 'sms' : 'email',\n    primary_to: phone ?? email,\n    follow_up_1_at: due(FOLLOW_UP_DAYS[0]),\n    follow_up_2_at: due(FOLLOW_UP_DAYS[1]),\n    follow_up_3_at: due(FOLLOW_UP_DAYS[2]),\n    close_at: due(CLOSE_AFTER_DAYS),\n  },\n}];\n"
+      },
+      "id": "791f3e8b-86f0-5fe1-9fb1-2ee23411a0d2",
+      "name": "Normalize Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        180
+      ],
+      "notes": "Spec step S2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "9db83c56-7527-54f6-981e-0776166b85c0",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "272ec140-386a-5ecf-b917-9b7093b78817",
+      "name": "Is Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        360
+      ],
+      "notes": "Spec step S2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TEAM_WEBHOOK_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'Lead rejected: ' + $json.reason, payload: $json.raw }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "59c23e56-86c3-5ded-8ad3-3e2ed48e29f3",
+      "name": "Dead Letter: Invalid Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        540
+      ],
+      "notes": "Spec step S9",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\": \"rejected\"}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "id": "15b4c5db-b408-56e2-95c4-5288bf5b581c",
+      "name": "Respond 422",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        260,
+        0
+      ],
+      "notes": "Spec step S9"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL }}/contacts/lookup",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: $('Normalize Lead').item.json.key, window_days: 30 }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "ff78e8d7-18dd-5a43-ac84-83bba851e3fb",
+      "name": "CRM Lookup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        180
+      ],
+      "notes": "Spec step S3",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "645ea084-28f4-5fa6-8616-0e289765a4ea",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "872f5441-e95a-592d-98d3-5b4fa4f11709",
+      "name": "Is Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        260,
+        360
+      ],
+      "notes": "Spec step S3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL }}/contacts/touch",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: $('Normalize Lead').item.json.key, source: $('Normalize Lead').item.json.source }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "763c137a-625a-5719-8156-eee76671eaf3",
+      "name": "Log Duplicate Touch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        540
+      ],
+      "notes": "Spec step S3",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\": \"duplicate\"}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "73ff7d5b-c7df-528c-92fb-3ec9b4149bb3",
+      "name": "Respond 200 Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        520,
+        0
+      ],
+      "notes": "Spec step S3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL }}/contacts/upsert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Normalize Lead').item.json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "d5bf42a0-1a7f-586d-8dc7-c230b52263ab",
+      "name": "CRM Upsert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        180
+      ],
+      "notes": "Spec step S4",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TEAM_WEBHOOK_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'CRM upsert failed for ' + $('Normalize Lead').item.json.name }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "108c7fcb-d541-5573-b382-fa5a727f8761",
+      "name": "Alert Team: CRM Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        360
+      ],
+      "notes": "Spec step S9",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TEAM_WEBHOOK_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'Could not reach ' + $('Normalize Lead').item.json.name + ' on any channel' }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "f096841e-cf66-55ce-96ed-54d9a1451b47",
+      "name": "Alert Team: Send Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        540
+      ],
+      "notes": "Spec step S9",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL }}/contacts/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: $('Normalize Lead').item.json.key, status: 'unreachable' }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "4e02bf7d-0d1d-50f1-bc5d-3a86f72ee90f",
+      "name": "Mark Unreachable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        0
+      ],
+      "notes": "Spec step S9",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MESSAGING_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $('Normalize Lead').item.json.primary_channel, to: $('Normalize Lead').item.json.primary_to, body: \"Hi \" + $('Normalize Lead').item.json.first_name + \", thanks for asking about \" + $('Normalize Lead').item.json.service + \". We have your request and will reply within one business day. Reply STOP to opt out.\" }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "59605d06-351d-59b1-848b-fc6bff870755",
+      "name": "Send Ack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        180
+      ],
+      "notes": "Spec step S5",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MESSAGING_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: 'email', to: $('Normalize Lead').item.json.email, body: \"Hi \" + $('Normalize Lead').item.json.first_name + \", thanks for asking about \" + $('Normalize Lead').item.json.service + \". We have your request and will reply within one business day. Reply STOP to opt out.\" }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "219333d1-befa-5658-a658-2ec322eaffdb",
+      "name": "Send Ack Fallback Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        360
+      ],
+      "notes": "Spec step S9",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TEAM_WEBHOOK_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'New lead: ' + $('Normalize Lead').item.json.name + ' (' + $('Normalize Lead').item.json.service + ')' }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "afbdf2ca-cbfd-54ab-983a-863986d41aec",
+      "name": "Notify Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        540
+      ],
+      "notes": "Spec step S6",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\": \"accepted\"}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "3b265d89-833e-5653-a68c-6e78ab358188",
+      "name": "Respond 202 Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        0
+      ],
+      "notes": "Spec step S6"
+    },
+    {
+      "parameters": {},
+      "id": "1ce3ed51-a638-51f1-98de-6b2e8e17d8a9",
+      "name": "Sequence Stopped",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        180
+      ],
+      "notes": "Spec step S7"
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $('Normalize Lead').item.json.follow_up_1_at }}"
+      },
+      "id": "4bdebd1a-f76a-5b4e-a529-25597a899bce",
+      "name": "Wait Until Follow Up 1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        360
+      ],
+      "notes": "Spec step S7",
+      "webhookId": "dfd2cf69-b11c-574f-9675-c89f84813f26"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL }}/contacts/status/read",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: $('Normalize Lead').item.json.key }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "246c3e10-ab3e-5ced-bb5c-02619b214e04",
+      "name": "Check Status 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        540
+      ],
+      "notes": "Spec step S7",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "62b813c4-c201-5030-8465-9fad60a19c47",
+              "leftValue": "={{ $json.status === 'new' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "095cac01-1df3-52d9-826a-f4cd31852c30",
+      "name": "Still Open 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1300,
+        0
+      ],
+      "notes": "Spec step S7"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MESSAGING_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $('Normalize Lead').item.json.primary_channel, to: $('Normalize Lead').item.json.primary_to, body: \"Hi \" + $('Normalize Lead').item.json.first_name + \", checking in on your \" + $('Normalize Lead').item.json.service + \" request. Is there a good time for a quick call? Reply STOP to opt out.\" }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "3cb311b8-6af6-5034-b850-a37250870ef1",
+      "name": "Send Follow Up 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        180
+      ],
+      "notes": "Spec step S7",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MESSAGING_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: 'email', to: $('Normalize Lead').item.json.email, body: \"Hi \" + $('Normalize Lead').item.json.first_name + \", checking in on your \" + $('Normalize Lead').item.json.service + \" request. Is there a good time for a quick call? Reply STOP to opt out.\" }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "dc60c504-9029-589d-92cc-119cbc6be1d6",
+      "name": "Send Follow Up 1 Fallback Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        360
+      ],
+      "notes": "Spec step S9",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $('Normalize Lead').item.json.follow_up_2_at }}"
+      },
+      "id": "84b2777f-b367-5835-9ac2-1c8eb85282d5",
+      "name": "Wait Until Follow Up 2",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1300,
+        540
+      ],
+      "notes": "Spec step S7",
+      "webhookId": "bae4bf5b-8037-5d3c-91d4-ec0756e40dd0"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL }}/contacts/status/read",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: $('Normalize Lead').item.json.key }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "bfc2923f-890c-57de-8afe-9e6ec60657e3",
+      "name": "Check Status 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        0
+      ],
+      "notes": "Spec step S7",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "35967132-52a6-538f-a1ac-e0e3e7ecccc6",
+              "leftValue": "={{ $json.status === 'new' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6c05aa46-2899-57cc-b5e6-df2f0c3708a0",
+      "name": "Still Open 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1560,
+        180
+      ],
+      "notes": "Spec step S7"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MESSAGING_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $('Normalize Lead').item.json.primary_channel, to: $('Normalize Lead').item.json.primary_to, body: \"Hi \" + $('Normalize Lead').item.json.first_name + \", we still have room this week for your \" + $('Normalize Lead').item.json.service + \" request. Reply here and we will set it up. Reply STOP to opt out.\" }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "f209e253-75a8-589a-ac62-09c20553a3ed",
+      "name": "Send Follow Up 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        360
+      ],
+      "notes": "Spec step S7",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MESSAGING_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: 'email', to: $('Normalize Lead').item.json.email, body: \"Hi \" + $('Normalize Lead').item.json.first_name + \", we still have room this week for your \" + $('Normalize Lead').item.json.service + \" request. Reply here and we will set it up. Reply STOP to opt out.\" }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "ddb9b38a-0c4c-5c9d-bf9d-3dc108e2e447",
+      "name": "Send Follow Up 2 Fallback Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        540
+      ],
+      "notes": "Spec step S9",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $('Normalize Lead').item.json.follow_up_3_at }}"
+      },
+      "id": "fabd3e7d-9e56-52b0-a2eb-06824b9cb3fc",
+      "name": "Wait Until Follow Up 3",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1820,
+        0
+      ],
+      "notes": "Spec step S7",
+      "webhookId": "403b6cd6-7e27-5944-9353-f80ad13d0bb1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL }}/contacts/status/read",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: $('Normalize Lead').item.json.key }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "f2be986a-8a9c-578d-ba65-5baf38aac4cb",
+      "name": "Check Status 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1820,
+        180
+      ],
+      "notes": "Spec step S7",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "88e313a4-9679-5d67-939c-e35285b352fa",
+              "leftValue": "={{ $json.status === 'new' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9f4571be-06a5-5981-aeb2-b6a49e83c6ea",
+      "name": "Still Open 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1820,
+        360
+      ],
+      "notes": "Spec step S7"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MESSAGING_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $('Normalize Lead').item.json.primary_channel, to: $('Normalize Lead').item.json.primary_to, body: \"Hi \" + $('Normalize Lead').item.json.first_name + \", last note from us about your \" + $('Normalize Lead').item.json.service + \" request. Reply any time and we will pick it back up. Reply STOP to opt out.\" }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "a0fd99c0-639a-5b7e-a860-79eb943f6f91",
+      "name": "Send Follow Up 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1820,
+        540
+      ],
+      "notes": "Spec step S7",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MESSAGING_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: 'email', to: $('Normalize Lead').item.json.email, body: \"Hi \" + $('Normalize Lead').item.json.first_name + \", last note from us about your \" + $('Normalize Lead').item.json.service + \" request. Reply any time and we will pick it back up. Reply STOP to opt out.\" }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "05c75bcd-69a5-59b9-9d4b-1b3e0fd059b3",
+      "name": "Send Follow Up 3 Fallback Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        0
+      ],
+      "notes": "Spec step S9",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $('Normalize Lead').item.json.close_at }}"
+      },
+      "id": "b4b31ff7-36e8-56f5-9565-d8959e764e2b",
+      "name": "Wait Until Close",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2080,
+        180
+      ],
+      "notes": "Spec step S8",
+      "webhookId": "9eaa74dd-6fde-5675-8fa8-2cb01838bb8c"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL }}/contacts/status/read",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: $('Normalize Lead').item.json.key }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "192515f7-2714-5825-ba83-e7831921e345",
+      "name": "Check Status Before Close",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        360
+      ],
+      "notes": "Spec step S8",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "3c8e4875-e3a5-55c6-845c-65ff877ec16e",
+              "leftValue": "={{ $json.status === 'new' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ab62df6b-ff77-575f-8022-ee10de6e84da",
+      "name": "Still Open At Close?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2080,
+        540
+      ],
+      "notes": "Spec step S8"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL }}/contacts/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: $('Normalize Lead').item.json.key, status: 'closed_no_response' }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "24ea0c45-1bed-50ea-bd47-2dc3ce7bfc73",
+      "name": "Mark Closed No Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        0
+      ],
+      "notes": "Spec step S8",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "1836ffeb-b58c-5094-9b77-e887260b1f34",
+      "name": "On Workflow Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        2340,
+        180
+      ],
+      "notes": "Spec step S9"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TEAM_WEBHOOK_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'Lead follow up failed at ' + $json.execution.lastNodeExecuted + ': ' + $json.execution.error.message, url: $json.execution.url }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "bd9cdf62-09d6-5cb1-a4a3-c74a8a1df9cd",
+      "name": "Alert Team: Workflow Error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        360
+      ],
+      "notes": "Spec step S9",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Gateway token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Alert Team: Send Failed": {
+      "main": [
+        [
+          {
+            "node": "Mark Unreachable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Ack": {
+      "main": [
+        [
+          {
+            "node": "Notify Team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Ack Fallback Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Ack Fallback Email": {
+      "main": [
+        [
+          {
+            "node": "Notify Team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Team: Send Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead": {
+      "main": [
+        [
+          {
+            "node": "Is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid?": {
+      "main": [
+        [
+          {
+            "node": "CRM Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dead Letter: Invalid Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dead Letter: Invalid Lead": {
+      "main": [
+        [
+          {
+            "node": "Respond 422",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM Lookup": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Log Duplicate Touch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CRM Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Duplicate Touch": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM Upsert": {
+      "main": [
+        [
+          {
+            "node": "Send Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Team: CRM Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Team: CRM Failed": {
+      "main": [
+        [
+          {
+            "node": "Send Ack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Team": {
+      "main": [
+        [
+          {
+            "node": "Respond 202 Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow Up 1": {
+      "main": [
+        [
+          {
+            "node": "Wait Until Follow Up 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Follow Up 1 Fallback Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow Up 1 Fallback Email": {
+      "main": [
+        [
+          {
+            "node": "Wait Until Follow Up 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Team: Send Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 202 Accepted": {
+      "main": [
+        [
+          {
+            "node": "Wait Until Follow Up 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Until Follow Up 1": {
+      "main": [
+        [
+          {
+            "node": "Check Status 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status 1": {
+      "main": [
+        [
+          {
+            "node": "Still Open 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still Open 1?": {
+      "main": [
+        [
+          {
+            "node": "Send Follow Up 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sequence Stopped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow Up 2": {
+      "main": [
+        [
+          {
+            "node": "Wait Until Follow Up 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Follow Up 2 Fallback Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow Up 2 Fallback Email": {
+      "main": [
+        [
+          {
+            "node": "Wait Until Follow Up 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Team: Send Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Until Follow Up 2": {
+      "main": [
+        [
+          {
+            "node": "Check Status 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status 2": {
+      "main": [
+        [
+          {
+            "node": "Still Open 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still Open 2?": {
+      "main": [
+        [
+          {
+            "node": "Send Follow Up 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sequence Stopped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow Up 3": {
+      "main": [
+        [
+          {
+            "node": "Wait Until Close",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Follow Up 3 Fallback Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow Up 3 Fallback Email": {
+      "main": [
+        [
+          {
+            "node": "Wait Until Close",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Team: Send Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Until Follow Up 3": {
+      "main": [
+        [
+          {
+            "node": "Check Status 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status 3": {
+      "main": [
+        [
+          {
+            "node": "Still Open 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still Open 3?": {
+      "main": [
+        [
+          {
+            "node": "Send Follow Up 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sequence Stopped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Until Close": {
+      "main": [
+        [
+          {
+            "node": "Check Status Before Close",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status Before Close": {
+      "main": [
+        [
+          {
+            "node": "Still Open At Close?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still Open At Close?": {
+      "main": [
+        [
+          {
+            "node": "Mark Closed No Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sequence Stopped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On Workflow Error": {
+      "main": [
+        [
+          {
+            "node": "Alert Team: Workflow Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "REPLACE_WITH_THIS_WORKFLOW_ID"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

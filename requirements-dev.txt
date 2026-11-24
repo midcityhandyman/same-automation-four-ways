@@ -1,0 +1,2 @@
+# The package itself has no runtime dependencies. Tests need pytest only.
+pytest>=8
