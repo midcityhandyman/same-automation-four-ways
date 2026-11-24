@@ -214,3 +214,40 @@ def test_late_night_lead_is_acknowledged_now_and_followed_up_at_8am(rig):
     assert len(rig.messenger.sent) == 1
     first_due = rig.store.jobs(KEY)[0]["due_at"]
     assert (first_due + timedelta(hours=-5)).strftime("%d %H:%M") == "07 08:00"
+
+
+def test_stop_with_punctuation_or_mixed_case_is_still_an_opt_out(rig):
+    rig.engine.handle_lead(lead(), T0)
+    assert rig.engine.handle_reply(PHONE, "Stop.", T0 + timedelta(hours=1)) == "opted_out"
+
+
+def test_reply_after_opt_out_keeps_the_opt_out(rig):
+    rig.engine.handle_lead(lead(), T0)
+    rig.engine.handle_reply(PHONE, "STOP", T0 + timedelta(hours=1))
+    before = len(rig.notifier.messages)
+
+    assert rig.engine.handle_reply(PHONE, "ok thanks", T0 + timedelta(hours=2)) == "opted_out"
+    assert rig.store.get_lead(KEY)["status"] == "opted_out"
+    assert len(rig.notifier.messages) == before
+
+
+def test_overdue_follow_up_found_at_night_waits_for_the_send_window(rig):
+    rig.engine.handle_lead(lead(), T0)
+    night = T0 + DAY + timedelta(hours=17)  # scheduler was down, back at 02:00 local
+
+    assert rig.engine.run_due(night) == 0
+    assert len(rig.messenger.sent) == 1  # the ack only
+    job = rig.store.jobs(KEY)[0]
+    assert (job["step"], job["status"]) == ("follow_up_1", "pending")
+    assert (job["due_at"] + timedelta(hours=-5)).strftime("%d %H:%M") == "07 08:00"
+    assert rig.engine.run_due(job["due_at"]) == 1
+    assert len(rig.messenger.sent) == 2
+
+
+def test_scheduler_gap_sends_one_follow_up_not_a_burst(rig):
+    rig.engine.handle_lead(lead(), T0)
+
+    assert rig.engine.run_due(T0 + 8 * DAY) == 1  # all three follow ups are overdue
+    assert len(rig.messenger.sent) == 2  # ack plus one follow up
+    assert "last note" in rig.messenger.sent[-1]["body"]
+    assert [job["status"] for job in rig.store.jobs(KEY)] == ["skipped", "skipped", "done", "pending"]

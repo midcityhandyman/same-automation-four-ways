@@ -38,7 +38,7 @@ optional.
 
 ## Stop conditions
 
-- A reply of `STOP`, `UNSUBSCRIBE`, `CANCEL`, `END` or `QUIT` sets `opted_out`.
+- A reply of `STOP`, `UNSUBSCRIBE`, `CANCEL`, `END` or `QUIT` sets `opted_out`, in any case and ignoring punctuation. A later reply never undoes an opt out.
 - Any other reply sets `replied` and tells the team a person should take over.
 - A booking sets `booked`.
 

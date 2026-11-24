@@ -117,6 +117,7 @@ PARITY_PAYLOADS = [
     {"name": " Blake Example ", "email": "blake@example.com", "received_at": "2026-01-06T04:30:00Z"},
     {"name": "Devon Demo", "phone": "1-555-555-0104", "received_at": "2026-01-06T10:15:00Z"},
     {"name": "Finley Mock", "phone": "+44 20 5555 0106", "received_at": "2026-01-06T01:00:00Z"},
+    {"name": "Harper Sample", "phone": "+65 5555 0109", "received_at": "2026-01-05T14:00:00Z"},
     {"name": "Casey Placeholder", "phone": "12345", "email": "not-an-email",
      "received_at": "2026-01-05T14:00:00Z"},
     {"name": "  ", "phone": "555-555-0108", "received_at": "2026-01-05T14:00:00Z"},

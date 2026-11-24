@@ -35,11 +35,11 @@ class Lead:
 def normalize_phone(value: Any) -> str | None:
     text = str(value or "").strip()
     digits = re.sub(r"[^0-9]", "", text)
+    if text.startswith("+"):  # already international: never guess a country code
+        return "+" + digits if 8 <= len(digits) <= 15 else None
     if len(digits) == 10:
         return "+1" + digits
     if len(digits) == 11 and digits.startswith("1"):
-        return "+" + digits
-    if text.startswith("+") and 8 <= len(digits) <= 15:
         return "+" + digits
     return None
 

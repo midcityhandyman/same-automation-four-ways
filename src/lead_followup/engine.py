@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable, Mapping
 
 from .config import Config
-from .normalize import ValidationError, normalize_email, normalize_phone, parse_lead, plan_schedule
+from .normalize import (ValidationError, normalize_email, normalize_phone, parse_lead,
+                        plan_schedule, quiet_adjust)
 from .ports import PermanentError, TransientError, with_retry
 from .store import Store
 
@@ -81,12 +83,16 @@ class Engine:
         if lead is None:
             self.store.log(now, None, "reply_unmatched", contact)
             return "unmatched"
-        status = "opted_out" if text.strip().upper() in STOP_WORDS else "replied"
-        return self.mark(lead["key"], status, now)
+        # "Stop." and "stop!" are opt outs too: compare letters only.
+        word = re.sub(r"[^A-Z]", "", text.upper())
+        return self.mark(lead["key"], "opted_out" if word in STOP_WORDS else "replied", now)
 
     def mark(self, key: str, status: str, now: datetime) -> str:
         """Set a terminal status (replied, booked, opted_out) and stop the sequence."""
         lead = self.store.get_lead(key)
+        if lead["status"] == "opted_out":  # an opt out is never overwritten by a later reply
+            self.store.log(now, key, "reply_after_opt_out", "status kept as opted_out")
+            return "opted_out"
         self.store.set_status(key, status)
         cancelled = self.store.cancel_pending(key)
         self.store.log(now, key, status, f"cancelled {cancelled} pending steps")
@@ -97,10 +103,24 @@ class Engine:
     # S7 and S8: run whatever is due
     def run_due(self, now: datetime) -> int:
         handled = 0
-        for key, step in self.store.claim_due(now):
+        claimed = self.store.claim_due(now)
+        # After a scheduler gap several follow ups can be due at once. Only the
+        # newest goes out, so nobody gets a burst of messages.
+        newest = {key: step for key, step in claimed if step != "close"}
+        in_window = quiet_adjust(now, self.config) == now
+        for key, step in claimed:
             lead = self.store.get_lead(key)
             if lead is None or lead["status"] != "new":
                 self.store.finish_job(key, step, "cancelled")
+                continue
+            if step != "close" and newest[key] != step:
+                self.store.finish_job(key, step, "skipped")
+                self.store.log(now, key, "skipped", f"{step} overdue, superseded by {newest[key]}")
+                continue
+            if step != "close" and not in_window:
+                # The window is checked again at send time, not only when planning.
+                self.store.add_job(key, step, quiet_adjust(now, self.config))
+                self.store.log(now, key, "deferred", f"{step} held until the send window opens")
                 continue
             if step == "close":  # S8
                 self.store.set_status(key, "closed_no_response")
